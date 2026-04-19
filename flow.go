@@ -66,12 +66,16 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 )
 
 // AllMethods is a slice containing all HTTP request methods.
 var AllMethods = []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace}
 
-var compiledRXPatterns = map[string]*regexp.Regexp{}
+var (
+	compiledRXPatterns   = map[string]*regexp.Regexp{}
+	compiledRXPatternsMu sync.RWMutex
+)
 
 // Mux is a http.Handler which dispatches requests to different handlers.
 type Mux struct {
@@ -124,7 +128,9 @@ func (m *Mux) Handle(pattern string, handler http.Handler, methods ...string) {
 		if strings.HasPrefix(segment, ":") {
 			_, rxPattern, containsRx := strings.Cut(segment, "|")
 			if containsRx {
+				compiledRXPatternsMu.Lock()
 				compiledRXPatterns[rxPattern] = regexp.MustCompile(rxPattern)
+				compiledRXPatternsMu.Unlock()
 			}
 		}
 	}
@@ -220,7 +226,11 @@ func (r *route) match(ctx context.Context, rq *http.Request, urlSegments []strin
 			}
 
 			if containsRx {
-				if compiledRXPatterns[rxPattern].MatchString(unescapedValue) {
+				compiledRXPatternsMu.RLock()
+				rx := compiledRXPatterns[rxPattern]
+				compiledRXPatternsMu.RUnlock()
+
+				if rx.MatchString(unescapedValue) {
 					rq.SetPathValue(key, unescapedValue)
 					continue
 				}
